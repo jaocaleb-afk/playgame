@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#080b18">
+<title>REAL or AI — Player</title>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<style>
+  :root{--bg:#080b18;--panel:#11162a;--line:#2a3560;--text:#fff;--muted:#a9b3d2;--blue:#39a7ff;--pink:#ff43cf;--gold:#ffc83d;--green:#43e08b;--red:#ff5f70}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:radial-gradient(circle at 50% -15%,#1d2e63 0,#080b18 52%,#050711 100%);color:var(--text)}
+  body{min-height:100svh;padding:14px;padding-top:max(14px,env(safe-area-inset-top));padding-bottom:max(14px,env(safe-area-inset-bottom))}
+  .app{max-width:560px;margin:auto;min-height:calc(100svh - 28px);display:flex;flex-direction:column}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:6px 4px 18px}.brand{font-weight:1000;font-size:23px;letter-spacing:-.6px}.brand span{color:var(--gold)}
+  .score{text-align:left;font-weight:950;font-size:17px}.score small{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800;margin-bottom:3px}.scoreBox{background:#10172b;border:1px solid #2b3763;padding:8px 11px;border-radius:12px;min-width:88px}
+  .screen{flex:1;display:flex;align-items:center;justify-content:center}.card{width:100%;background:rgba(17,22,42,.96);border:1px solid var(--line);border-radius:24px;padding:20px;box-shadow:0 18px 55px rgba(0,0,0,.28)}
+  .state{color:var(--muted);font-size:13px;margin-bottom:10px}.nickname{font-size:24px;font-weight:950}.welcome h1{font-size:38px;line-height:1.02;margin:0 0 10px;letter-spacing:-1.2px}.welcome p{color:var(--muted);line-height:1.5;margin:0 0 20px}
+  input{width:100%;background:#0a1022;border:1px solid #344273;color:#fff;border-radius:15px;padding:16px;font-size:17px;outline:none;margin-bottom:10px}input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(57,167,255,.14)}
+  button{width:100%;border:0;border-radius:15px;padding:17px;color:#fff;font-weight:950;font-size:17px;cursor:pointer;background:linear-gradient(135deg,var(--blue),#5d6bff);margin-top:10px}.mutedBtn{background:#1a2240}.real{background:linear-gradient(135deg,#18bd72,#54eaa3);min-height:130px}.ai{background:linear-gradient(135deg,#8c3bd8,#e06bff);min-height:130px}
+  .answers{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.answers button{font-size:21px;letter-spacing:.2px}
+  .live{font-size:29px;font-weight:950;line-height:1.06;margin-bottom:8px}.hint{color:var(--muted);line-height:1.45}.locked{opacity:.55;pointer-events:none}
+  .result{text-align:center;padding:28px 10px}.result .big{font-size:54px;font-weight:1000;line-height:1}.result h2{font-size:28px;margin:14px 0 8px}.result p{color:var(--muted);font-size:16px}.pill{display:inline-block;padding:9px 13px;border-radius:999px;background:#0a1022;border:1px solid #2e3b69;margin-top:10px;font-weight:900}
+  .smallStatus{text-align:center;color:var(--muted);font-size:12px;padding:8px}
+  @media(max-width:430px){.answers{grid-template-columns:1fr}.answers button{min-height:105px}.welcome h1{font-size:34px}.card{padding:18px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">REAL <span>or</span> AI</div>
+    <div class="scoreBox score"><small id="nickLabel">Nickname</small><span id="nickTop">—</span><div style="margin-top:6px"><small>Points</small><span id="pointsTop">0</span></div></div>
+  </div>
+
+  <div class="screen" id="screen"></div>
+  <div class="smallStatus" id="status">Not connected</div>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let peer = null, conn = null, nickname = '', score = 0, currentRound = 0, hasAnswered = false;
+
+  function show(html){ $('screen').innerHTML = html; }
+  function setStatus(text){ $('status').textContent = text; }
+  function escapeHTML(s){ return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function updateTop(){ $('nickTop').textContent = nickname || '—'; $('pointsTop').textContent = score; }
+  function send(data){ if(conn?.open) conn.send(data); }
+
+  function showJoin(){
+    show(`<div class="card welcome">
+      <div class="state">PLAYER MODE</div>
+      <h1>Join the game.</h1>
+      <p>Enter the host's room code and choose a nickname. Your answers and score are synced live.</p>
+      <input id="roomInput" maxlength="40" autocomplete="off" autocapitalize="none" placeholder="Host room code">
+      <input id="nameInput" maxlength="24" autocomplete="nickname" placeholder="Your nickname">
+      <button id="joinBtn">JOIN GAME</button>
+      <button id="demoBtn" class="mutedBtn">Use a Demo Nickname</button>
+    </div>`);
+    $('demoBtn').onclick = () => { $('nameInput').value = 'Player' + Math.floor(100 + Math.random()*900); };
+    $('joinBtn').onclick = join;
+    $('nameInput').addEventListener('keydown',e=>{if(e.key==='Enter') join();});
+    $('roomInput').addEventListener('keydown',e=>{if(e.key==='Enter') $('nameInput').focus();});
+  }
+
+  function join(){
+    const room = $('roomInput').value.trim();
+    const name = $('nameInput').value.trim().slice(0,24) || 'Player';
+    if(!room){ setStatus('Enter the host room code.'); return; }
+    nickname = name; updateTop(); setStatus('Connecting…');
+    if(peer){ try{peer.destroy();}catch{} }
+    peer = new Peer();
+    peer.on('open', id => {
+      conn = peer.connect(room, {reliable:true});
+      conn.on('open',()=>{ send({type:'join',nickname}); setStatus('Connected to host'); showWaiting('Connected!'); });
+      conn.on('data', handleMessage);
+      conn.on('close',()=>{ setStatus('Disconnected from host'); showLostConnection(); });
+      conn.on('error',()=>setStatus('Connection error'));
+    });
+    peer.on('error', err => { setStatus('Could not connect: ' + err.type); });
+  }
+
+  function showWaiting(message='Waiting for the host…'){
+    show(`<div class="card" style="text-align:center"><div class="state">${escapeHTML(nickname)}</div><div class="live">${escapeHTML(message)}</div><div class="hint">The question will appear on the host's screen. When the host starts it, choose REAL or AI here.</div></div>`);
+  }
+  function showLostConnection(){
+    show(`<div class="card result"><div class="big">⚠</div><h2>Connection lost</h2><p>The player connection to the host closed.</p><button onclick="location.reload()">Reconnect</button></div>`);
+  }
+
+  function handleMessage(data){
+    if(!data || typeof data !== 'object') return;
+    if(data.type==='welcome'){
+      currentRound = data.round || 0;
+      if(data.active) showQuestion(currentRound); else showWaiting();
+    }
+    if(data.type==='question') showQuestion(data.round);
+    if(data.type==='result'){
+      if(data.round !== currentRound) return;
+      score = Number(data.score)||score; updateTop(); showResult(data.correct, data.correctAnswer, score);
+    }
+    if(data.type==='reset'){
+      hasAnswered = false;
+      showWaiting('Ready for the next question.');
+    }
+  }
+
+  function showQuestion(round){
+    currentRound = round; hasAnswered=false;
+    show(`<div class="card">
+      <div class="state">QUESTION ${round}</div>
+      <div class="live">REAL or AI?</div>
+      <div class="hint">Look at the question on the shared screen, then choose your answer below.</div>
+      <div class="answers">
+        <button class="real" id="realBtn">REAL</button>
+        <button class="ai" id="aiBtn">AI</button>
+      </div>
+    </div>`);
+    $('realBtn').onclick=()=>answer('REAL');
+    $('aiBtn').onclick=()=>answer('AI');
+  }
+
+  function answer(value){
+    if(hasAnswered) return;
+    hasAnswered=true;
+    send({type:'answer',round:currentRound,answer:value});
+    show(`<div class="card result"><div class="big">✓</div><h2>Answer locked</h2><p>You chose <strong>${value}</strong>. Waiting for the host to reveal the answer…</p><div class="pill">Question ${currentRound}</div></div>`);
+    setStatus('Answer sent');
+  }
+
+  function showResult(correct, actual, points){
+    show(`<div class="card result">
+      <div class="big">${correct ? '✓' : '✕'}</div>
+      <h2>${correct ? 'Correct!' : 'Not this time.'}</h2>
+      <p>The answer was <strong>${actual}</strong>.</p>
+      <div class="pill">${points} points</div>
+    </div>`);
+    setStatus(correct ? 'Correct answer' : 'Round complete');
+  }
+
+  showJoin();
+  updateTop();
+})();
+</script>
+</body>
+</html>
